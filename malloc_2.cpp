@@ -1,6 +1,7 @@
 
 #include <iostream>
 #include <unistd.h>
+#include <cstring>
 
 #define ZERO_SIZE_MALLOC_REQ  0
 #define MAX_SIZE_MALLOC_REQ   100000000
@@ -22,7 +23,7 @@ size_t _num_free_blocks();
 size_t _num_free_bytes();
 size_t _num_allocated_blocks();
 size_t _num_allocated_bytes();
-size_t _size_meta_data_bytes();
+size_t _num_meta_data_bytes();
 size_t _size_meta_data();
 //================= Struct related end =================
 
@@ -194,7 +195,7 @@ size_t _num_allocated_bytes(){
      }
      return alloced_bytes_count;
 }
-size_t _size_meta_data_bytes(){
+size_t _num_meta_data_bytes(){
      return _num_allocated_blocks() * _size_meta_data();
 }
 size_t _size_meta_data(){
