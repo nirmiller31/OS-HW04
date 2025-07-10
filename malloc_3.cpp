@@ -131,16 +131,16 @@ void remove_from_free_list(MallocMetadata* block, int order){
 void* smalloc(size_t size){
 
      static bool list_initialized = false;
+     if( !list_initialized ){
+          initial_allocator();
+          list_initialized = true;
+     }
 
      if(size == ZERO_SIZE_MALLOC_REQ){            // Bullet a. (size is 0), TODO what if size<0?
           return NULL;
      }
      if(size > MAX_SIZE_MALLOC_REQ){              // Bullet b. (size is bigger than 10^8)
           return NULL;
-     }
-     if( !list_initialized ){
-          initial_allocator();
-          list_initialized = true;
      }
 
      if( size + sizeof(MallocMetadata) >= SIZE_FOR_MMAP ){  // Challenge 3 mmap() usage for >= 128kb
@@ -288,6 +288,10 @@ void* srealloc(void* oldp, size_t size){
                return new_block;
      }
 
+     if(block_Metadata->size >= required_size){         // Re-use the oldp, it is good enuogh
+          return oldp;
+     }
+
      MallocMetadata* simulated = block_Metadata;  // Here we are not mmap
      int current_order = simulated->order;
      size_t offset = (char*)simulated - (char*)base_address;
@@ -342,7 +346,7 @@ size_t _num_free_bytes(){
      for(int i = 0 ; i<=MAX_ORDER ; i++){
           MallocMetadata* current_p = free_list[i];
           while(current_p){
-               free_bytes_count += current_p->size;
+               free_bytes_count += (current_p->size - sizeof(MallocMetadata));
                current_p = current_p->next;
           }
      }
@@ -353,14 +357,20 @@ size_t _num_allocated_blocks(){
           return 0;
      }
      size_t alloced_blocks_count = 0;
-     char* cursor = (char*)base_address;
-     char* end = cursor + INITIAL_HEAP_SIZE;
-     while(cursor < end){
-          MallocMetadata* block = (MallocMetadata*)cursor;
+     for(int i=0 ; i<=MAX_ORDER ; i++){           // Count the free blocks
+          MallocMetadata* block = free_list[i];
+          while(block){
+               alloced_blocks_count++;
+               block = block->next;
+          }
+     }
+     size_t offset = 0;
+     while(offset < INITIAL_HEAP_SIZE){           // Count the !free blocks
+          MallocMetadata* block = (MallocMetadata*)((char*)base_address + offset);
           if( !block->is_free && !block->is_mmap ){
                alloced_blocks_count++;
           }
-          cursor += block->size;
+          offset += block->size;
      }
      MallocMetadata* mmap_curr = mmap_list;
      while (mmap_curr) {
@@ -374,18 +384,24 @@ size_t _num_allocated_bytes(){
           return 0;
      }
      size_t alloced_bytes_count = 0;
-     char* cursor = (char*)base_address;
-     char* end = cursor + INITIAL_HEAP_SIZE;
-     while(cursor < end){
-          MallocMetadata* block = (MallocMetadata*)cursor;
-          if( !block->is_free && !block->is_mmap ){
-               alloced_bytes_count += block->size;
+          for(int i=0 ; i<=MAX_ORDER ; i++){           // Count the free blocks
+          MallocMetadata* block = free_list[i];
+          while(block){
+               alloced_bytes_count += (block->size - sizeof(MallocMetadata));
+               block = block->next;
           }
-          cursor += block->size;
+     }
+     size_t offset = 0;
+     while(offset < INITIAL_HEAP_SIZE){           // Count the !free blocks
+          MallocMetadata* block = (MallocMetadata*)((char*)base_address + offset);
+          if( !block->is_free && !block->is_mmap ){
+               alloced_bytes_count += (block->size - sizeof(MallocMetadata));
+          }
+          offset += block->size;
      }
      MallocMetadata* mmap_curr = mmap_list;
      while (mmap_curr) {
-          alloced_bytes_count += mmap_curr->size;
+          alloced_bytes_count += (mmap_curr->size - sizeof(MallocMetadata));
          mmap_curr = mmap_curr->next;
      }
      return alloced_bytes_count;
