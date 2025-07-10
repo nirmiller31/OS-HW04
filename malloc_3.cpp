@@ -349,6 +349,9 @@ size_t _num_free_bytes(){
      return free_bytes_count;
 }
 size_t _num_allocated_blocks(){
+     if (base_address == nullptr) {
+          return 0;
+     }
      size_t alloced_blocks_count = 0;
      char* cursor = (char*)base_address;
      char* end = cursor + INITIAL_HEAP_SIZE;
@@ -367,6 +370,9 @@ size_t _num_allocated_blocks(){
      return alloced_blocks_count;
 }
 size_t _num_allocated_bytes(){
+     if (base_address == nullptr) {
+          return 0;
+     }
      size_t alloced_bytes_count = 0;
      char* cursor = (char*)base_address;
      char* end = cursor + INITIAL_HEAP_SIZE;
