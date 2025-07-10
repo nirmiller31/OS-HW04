@@ -46,15 +46,26 @@ void insert_to_free_list(MallocMetadata* block, int order);
 void remove_from_free_list(MallocMetadata* block, int order);
 
 void initial_allocator(){
-     base_address = sbrk(INITIAL_HEAP_SIZE);                                    // Initial size for 32 free blocks, each is 10 order
-     if( base_address == (void*)FAIL_SBRK_MALLOC_REQ ){
+
+     void* curr = sbrk(0);                                                      // Your alligment trick
+     char* curr_ptr = (char*)curr;
+     size_t align_size = INITIAL_HEAP_SIZE;
+     size_t offset = (size_t)curr_ptr % align_size;
+     size_t padding = (offset == 0) ? 0 : (align_size-offset);
+     
+     void* raw = sbrk(padding + INITIAL_HEAP_SIZE);
+     if( raw == (void*)FAIL_SBRK_MALLOC_REQ ){
           perror("sbrk failed in the initial_allocator");                       // Some error handling
           exit(1);
      }
+
+     base_address = (char*)raw + padding;                                       // Initial size for 32 free blocks, each is 10 order
+
      for(int i=0 ; i<TOTAL_BLOCKS ; ++i){
           MallocMetadata* block    = (MallocMetadata*)((char*)base_address + (i * INITIAL_BLOCK_SIZE));
           block -> size            = INITIAL_BLOCK_SIZE;
           block -> is_free         = true;
+          block -> is_mmap         = false;
           block -> order           = MAX_ORDER;
           block -> next            = nullptr;
           block -> prev            = nullptr;
@@ -217,10 +228,16 @@ void sfree(void* p){
           return;
      }
      if(block_Metadata->is_mmap){
+          if(block_Metadata->prev){
+               (block_Metadata->prev)->next  = block_Metadata->next;
+          }
+          else{
+               mmap_list                     = block_Metadata -> next;
+          }
+          if(block_Metadata->next){
+               (block_Metadata->next)->prev  = block_Metadata ->prev;
+          }
           munmap((void*)block_Metadata, block_Metadata->size);
-          return;
-     }
-     if(block_Metadata->is_free){           // Already handled
           return;
      }
      block_Metadata -> is_free = true;
@@ -256,8 +273,44 @@ void* srealloc(void* oldp, size_t size){
           return smalloc(size);                   // Bullet Succes.b. smalloc equivalant
      }
      MallocMetadata* block_Metadata = (((MallocMetadata*)oldp) - 1);
-     if(block_Metadata->size >= size){
-          return oldp;                            // First bullet
+     size_t required_size = size + sizeof(MallocMetadata);
+
+     if(block_Metadata->is_mmap){
+          if(block_Metadata->size == required_size){
+               return oldp;
+               }
+               void* new_block = smalloc(size);
+               if(!new_block) {
+                    return NULL;
+               }
+               std::memmove(new_block, oldp, std::min(block_Metadata->size - sizeof(MallocMetadata), size));
+               sfree(oldp);
+               return new_block;
+     }
+
+     MallocMetadata* simulated = block_Metadata;  // Here we are not mmap
+     int current_order = simulated->order;
+     size_t offset = (char*)simulated - (char*)base_address;
+ 
+     while(current_order < MAX_ORDER){
+          size_t block_size = ZERO_ORDER_BLOCK_SIZE << current_order;
+          size_t buddy_offset = offset ^ block_size;
+          MallocMetadata* buddy = (MallocMetadata*)((char*)base_address + buddy_offset);
+     
+          if (!(buddy->is_free && buddy->order == current_order)) {
+               break;
+          }
+ 
+          size_t merged_size = ZERO_ORDER_BLOCK_SIZE << (current_order + 1);
+          if(merged_size >= required_size) {
+               sfree(oldp);                            // sfree merge usage
+               void* new_block = smalloc(size);
+               if (new_block) {
+                    std::memmove(new_block, oldp, std::min(block_Metadata->size - sizeof(MallocMetadata), size));
+               }
+               return new_block;
+          }
+          current_order++;
      }
 
      void* new_block = smalloc(size);             // If here we need a new memory allocation
@@ -315,12 +368,14 @@ size_t _num_allocated_blocks(){
 }
 size_t _num_allocated_bytes(){
      size_t alloced_bytes_count = 0;
-     for (int i = 0; i <= MAX_ORDER; ++i) {
-         MallocMetadata* curr = free_list[i];
-         while (curr) {
-          alloced_bytes_count += curr->size;
-             curr = curr->next;
-         }
+     char* cursor = (char*)base_address;
+     char* end = cursor + INITIAL_HEAP_SIZE;
+     while(cursor < end){
+          MallocMetadata* block = (MallocMetadata*)cursor;
+          if( !block->is_free && !block->is_mmap ){
+               alloced_bytes_count += block->size;
+          }
+          cursor += block->size;
      }
      MallocMetadata* mmap_curr = mmap_list;
      while (mmap_curr) {
